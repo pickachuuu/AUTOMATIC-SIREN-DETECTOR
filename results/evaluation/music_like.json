@@ -1,0 +1,13 @@
+{
+  "detected": false,
+  "confidence": 0.51,
+  "siren_band_energy_ratio": 0.24,
+  "sweep_score": 0.0,
+  "persistence": 0.256,
+  "intervals_seconds": [
+    [
+      3.744,
+      5.024
+    ]
+  ]
+}

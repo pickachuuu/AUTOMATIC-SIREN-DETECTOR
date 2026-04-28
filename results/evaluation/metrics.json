@@ -1,0 +1,74 @@
+{
+  "accuracy": 1.0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "true_positives": 3,
+  "true_negatives": 4,
+  "false_positives": 0,
+  "false_negatives": 0,
+  "samples": [
+    {
+      "path": "data\\siren_clear.wav",
+      "expected": 1,
+      "predicted": 1,
+      "confidence": 1.0,
+      "sweep_score": 1.0,
+      "siren_band_energy_ratio": 0.972,
+      "persistence": 1.0
+    },
+    {
+      "path": "data\\siren_traffic.wav",
+      "expected": 1,
+      "predicted": 1,
+      "confidence": 1.0,
+      "sweep_score": 1.0,
+      "siren_band_energy_ratio": 0.617,
+      "persistence": 1.0
+    },
+    {
+      "path": "data\\siren_low_volume.wav",
+      "expected": 1,
+      "predicted": 1,
+      "confidence": 1.0,
+      "sweep_score": 1.0,
+      "siren_band_energy_ratio": 0.418,
+      "persistence": 1.0
+    },
+    {
+      "path": "data\\traffic_noise.wav",
+      "expected": 0,
+      "predicted": 0,
+      "confidence": 0.058,
+      "sweep_score": 0.0,
+      "siren_band_energy_ratio": 0.066,
+      "persistence": 0.0
+    },
+    {
+      "path": "data\\speech_like.wav",
+      "expected": 0,
+      "predicted": 0,
+      "confidence": 0.099,
+      "sweep_score": 0.0,
+      "siren_band_energy_ratio": 0.113,
+      "persistence": 0.0
+    },
+    {
+      "path": "data\\music_like.wav",
+      "expected": 0,
+      "predicted": 0,
+      "confidence": 0.51,
+      "sweep_score": 0.0,
+      "siren_band_energy_ratio": 0.24,
+      "persistence": 0.256
+    },
+    {
+      "path": "data\\horn_like.wav",
+      "expected": 0,
+      "predicted": 0,
+      "confidence": 0.088,
+      "sweep_score": 0.0,
+      "siren_band_energy_ratio": 0.1,
+      "persistence": 0.0
+    }
+  ]
+}

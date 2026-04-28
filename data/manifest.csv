@@ -1,0 +1,8 @@
+path,label
+data/siren_clear.wav,1
+data/siren_traffic.wav,1
+data/siren_low_volume.wav,1
+data/traffic_noise.wav,0
+data/speech_like.wav,0
+data/music_like.wav,0
+data/horn_like.wav,0
