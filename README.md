@@ -9,6 +9,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python scripts/generate_samples.py
+npm install
 ```
 
 ## Run
@@ -24,6 +25,34 @@ Evaluate all bundled examples:
 ```powershell
 python src/evaluate.py --manifest data/manifest.csv --out results/evaluation
 ```
+
+Launch the Tkinter app:
+
+```powershell
+python src/siren_app.py
+```
+
+The app accepts `.wav` files through drag-and-drop or the file picker and writes GUI outputs under `results/gui_<filename>`.
+
+Launch the Electron app:
+
+```powershell
+npm run dev
+```
+
+Run the TypeScript detector tests:
+
+```powershell
+npm test
+```
+
+Build the Electron/Vite app:
+
+```powershell
+npm run build
+```
+
+The Electron app uses a TypeScript port of the detector and keeps the Python implementation as the reference baseline.
 
 ## Theory
 
