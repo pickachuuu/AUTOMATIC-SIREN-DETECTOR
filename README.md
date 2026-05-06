@@ -53,6 +53,7 @@ npm run build
 ```
 
 The Electron app uses a TypeScript port of the detector and keeps the Python implementation as the reference baseline.
+Use the realtime monitor controls in the input rail to start or stop microphone-based rolling detection.
 
 ## Theory
 

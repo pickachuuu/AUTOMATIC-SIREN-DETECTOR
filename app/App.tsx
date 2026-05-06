@@ -5,15 +5,23 @@ import {
   FileAudio,
   FolderOpen,
   Loader2,
+  Mic,
   RadioTower,
   Siren,
+  Square,
   Waves,
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FrequencyTrackCanvas, SpectrogramCanvas, WaveformCanvas } from "./components/Charts";
-import { analyzeWavBytes, resultToJson } from "./detector/analyze";
+import { analyzeSamples, analyzeWavBytes, resultToJson } from "./detector/analyze";
 import type { AnalysisResult } from "./detector/types";
+import {
+  appendRollingBuffer,
+  createDetectionEvent,
+  REALTIME_ANALYSIS_INTERVAL_MS,
+  type RealtimeEvent
+} from "./realtime";
 
 interface HistoryEntry {
   filename: string;
@@ -47,17 +55,34 @@ function panelClass(extra = "") {
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const liveBufferRef = useRef<Float64Array>(new Float64Array());
+  const liveSampleRateRef = useRef(0);
+  const lastRealtimeAnalysisRef = useRef(0);
+  const realtimeDetectedRef = useRef(false);
   const [samples, setSamples] = useState<BundledSample[]>([]);
   const [selectedName, setSelectedName] = useState("No file selected");
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState("");
+  const [realtimeError, setRealtimeError] = useState("");
+  const [isRealtimeActive, setIsRealtimeActive] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [realtimeEvents, setRealtimeEvents] = useState<RealtimeEvent[]>([]);
   const [chartTab, setChartTab] = useState<ChartTab>("spectrogram");
 
   useEffect(() => {
     void window.sirenDesktop?.listBundledSamples().then(setSamples).catch(() => setSamples([]));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopRealtime();
+    };
   }, []);
 
   const metrics = useMemo(
@@ -71,6 +96,9 @@ export default function App() {
   );
 
   async function runAnalysis(name: string, buffer: ArrayBuffer, filePath?: string) {
+    if (isRealtimeActive) {
+      stopRealtime();
+    }
     setIsAnalyzing(true);
     setError("");
     setSelectedName(name);
@@ -138,9 +166,120 @@ export default function App() {
     await window.sirenDesktop?.exportAnalysisJson(`${result.filename.replace(/\.wav$/i, "")}.json`, resultToJson(result));
   }
 
+  function stopRealtime() {
+    processorRef.current?.disconnect();
+    micSourceRef.current?.disconnect();
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    void audioContextRef.current?.close();
+
+    processorRef.current = null;
+    micSourceRef.current = null;
+    micStreamRef.current = null;
+    audioContextRef.current = null;
+    liveBufferRef.current = new Float64Array();
+    liveSampleRateRef.current = 0;
+    lastRealtimeAnalysisRef.current = 0;
+    realtimeDetectedRef.current = false;
+    setIsRealtimeActive(false);
+  }
+
+  async function startRealtime() {
+    if (isRealtimeActive) {
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setRealtimeError("Microphone capture is unavailable in this environment.");
+      return;
+    }
+
+    setRealtimeError("");
+    setError("");
+    setSelectedName("Live microphone");
+    setSelectedPath("Rolling 4-second realtime monitor");
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      });
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      const audioContext = new AudioContextCtor();
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      liveSampleRateRef.current = audioContext.sampleRate;
+      liveBufferRef.current = new Float64Array();
+      lastRealtimeAnalysisRef.current = 0;
+      realtimeDetectedRef.current = false;
+
+      processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        const chunk = new Float64Array(input.length);
+        chunk.set(input);
+        liveBufferRef.current = appendRollingBuffer(liveBufferRef.current, chunk, audioContext.sampleRate);
+
+        const now = performance.now();
+        if (
+          liveBufferRef.current.length < audioContext.sampleRate * 0.75 ||
+          now - lastRealtimeAnalysisRef.current < REALTIME_ANALYSIS_INTERVAL_MS
+        ) {
+          return;
+        }
+
+        lastRealtimeAnalysisRef.current = now;
+        try {
+          const liveResult = analyzeSamples(liveBufferRef.current, audioContext.sampleRate, "Live microphone");
+          const eventRecord = createDetectionEvent(liveResult, realtimeDetectedRef.current);
+          realtimeDetectedRef.current = liveResult.detected;
+          setResult(liveResult);
+          if (eventRecord) {
+            setRealtimeEvents((items) => [eventRecord, ...items].slice(0, 8));
+            setHistory((items) =>
+              [
+                {
+                  filename: "Live microphone",
+                  detected: true,
+                  confidence: liveResult.confidence,
+                  time: eventRecord.timestamp
+                },
+                ...items
+              ].slice(0, 8)
+            );
+          }
+        } catch (analysisError) {
+          setRealtimeError(analysisError instanceof Error ? analysisError.message : "Realtime analysis failed.");
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      micStreamRef.current = stream;
+      audioContextRef.current = audioContext;
+      micSourceRef.current = source;
+      processorRef.current = processor;
+      setIsRealtimeActive(true);
+    } catch (micError) {
+      stopRealtime();
+      setRealtimeError(micError instanceof Error ? micError.message : "Microphone permission was denied.");
+    }
+  }
+
   const detected = Boolean(result?.detected);
   const hasResult = Boolean(result);
-  const statusLabel = isAnalyzing ? "Scanning" : detected ? "Siren detected" : hasResult ? "Signal clear" : "Armed";
+  const statusLabel = isRealtimeActive
+    ? detected
+      ? "Live alert"
+      : "Live monitor"
+    : isAnalyzing
+      ? "Scanning"
+      : detected
+        ? "Siren detected"
+        : hasResult
+          ? "Signal clear"
+          : "Armed";
   const statusTone = detected
     ? "border-red-500 bg-red-500 text-zinc-950 shadow-[6px_6px_0_#facc15]"
     : hasResult
@@ -172,13 +311,40 @@ export default function App() {
         <div className="grid min-h-0 gap-3 xl:grid-cols-[260px_minmax(0,1fr)_300px] lg:grid-cols-[230px_minmax(0,1fr)]">
           <section className={`${panelClass("min-h-0 overflow-hidden")} flex flex-col`} aria-label="Input controls">
             <div className="border-b-2 border-zinc-100 p-3">
-              <div className="flex items-center gap-2">
-                <RadioTower className="h-5 w-5 text-red-400" aria-hidden="true" />
-                <h2 className="text-base font-black uppercase">Input</h2>
-              </div>
+            <div className="flex items-center gap-2">
+              <RadioTower className="h-5 w-5 text-red-400" aria-hidden="true" />
+              <h2 className="text-base font-black uppercase">Input</h2>
             </div>
+          </div>
 
             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+              <div className="border-2 border-zinc-100 bg-zinc-100 p-2 text-zinc-950 shadow-[4px_4px_0_#ef4444]">
+                <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em]">Realtime monitor</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="flex min-h-10 items-center justify-center gap-2 border-2 border-zinc-950 bg-red-500 px-2 text-xs font-black uppercase text-zinc-950 transition hover:bg-yellow-300 disabled:opacity-50"
+                    type="button"
+                    onClick={() => void startRealtime()}
+                    disabled={isRealtimeActive}
+                  >
+                    <Mic className="h-4 w-4" aria-hidden="true" />
+                    Start
+                  </button>
+                  <button
+                    className="flex min-h-10 items-center justify-center gap-2 border-2 border-zinc-950 bg-zinc-950 px-2 text-xs font-black uppercase text-zinc-100 transition hover:bg-zinc-800 disabled:opacity-50"
+                    type="button"
+                    onClick={stopRealtime}
+                    disabled={!isRealtimeActive}
+                  >
+                    <Square className="h-4 w-4" aria-hidden="true" />
+                    Stop
+                  </button>
+                </div>
+                <p className="mt-2 text-xs font-bold leading-tight">
+                  {isRealtimeActive ? "Listening with a rolling 4-second analysis window." : "Live microphone mode updates the console automatically."}
+                </p>
+              </div>
+
               <div
                 className="grid min-h-32 cursor-pointer place-items-center border-2 border-dashed border-yellow-300 bg-yellow-300 p-3 text-center text-zinc-950 transition hover:-translate-y-0.5 hover:bg-red-500 hover:text-zinc-950"
                 onClick={() => void handleBrowse()}
@@ -260,6 +426,12 @@ export default function App() {
                 {error}
               </div>
             ) : null}
+            {realtimeError ? (
+              <div className="mx-3 mt-3 flex min-h-11 items-center gap-2 border-2 border-yellow-300 bg-yellow-300 px-3 text-sm font-black text-zinc-950" role="alert">
+                <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+                {realtimeError}
+              </div>
+            ) : null}
 
             <div className="flex min-h-0 flex-1 flex-col p-3 pt-3">
               <div className="mb-3 grid gap-3 md:grid-cols-[1fr_auto]">
@@ -285,9 +457,10 @@ export default function App() {
                 </div>
               </div>
 
-              <div className={`relative min-h-0 flex-1 overflow-hidden border-2 border-zinc-100 bg-black ${isAnalyzing ? "is-scanning" : ""}`}>
+              <div className={`relative min-h-0 flex-1 overflow-hidden border-2 border-zinc-100 bg-black ${isAnalyzing || isRealtimeActive ? "is-scanning" : ""}`}>
                 <div className="absolute left-3 top-3 z-10 flex items-center gap-2 border-2 border-zinc-100 bg-zinc-950/90 px-2 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-yellow-300">
                   <Zap className="h-3.5 w-3.5" aria-hidden="true" />
+                  {isRealtimeActive ? "Live " : ""}
                   {chartTab === "spectrogram" ? "Time-frequency scan" : chartTab === "waveform" ? "Waveform response" : "Sweep trajectory"}
                 </div>
                 {chartTab === "waveform" ? <WaveformCanvas result={result} /> : null}
@@ -323,6 +496,23 @@ export default function App() {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              <div className="mb-3 border-2 border-zinc-100 bg-zinc-100 p-2 text-zinc-950">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em]">Realtime events</p>
+                <div className="mt-2 grid gap-2">
+                  {realtimeEvents.length === 0 ? <p className="text-xs font-bold">No live siren events yet.</p> : null}
+                  {realtimeEvents.map((event) => (
+                    <div key={event.id} className="border-2 border-zinc-950 bg-red-500 p-2 text-zinc-950">
+                      <div className="flex items-center justify-between gap-2">
+                        <strong className="text-xs font-black uppercase">Live alert</strong>
+                        <time className="font-mono text-xs font-black">{event.timestamp}</time>
+                      </div>
+                      <p className="mt-1 font-mono text-xs font-black">
+                        conf {event.confidence.toFixed(3)} / sweep {event.sweepScore.toFixed(3)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
               <div className="mb-3 grid gap-2">
                 {[
                   ["Sampling", "Normalized and resampled to 16 kHz."],

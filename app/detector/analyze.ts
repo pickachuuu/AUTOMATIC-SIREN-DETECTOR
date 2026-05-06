@@ -1,5 +1,6 @@
 import { bandpassFilter, extractFeatures } from "./dsp";
 import { TARGET_SAMPLE_RATE, type AnalysisResult, type DetectionFeatures, type DetectionResult } from "./types";
+import { normalizeAudio } from "./wav";
 import { decodeWav, resampleLinear } from "./wav";
 
 function round3(value: number) {
@@ -54,7 +55,11 @@ function makeTimes(length: number, sampleRate: number) {
 export function analyzeWavBytes(bytes: ArrayBuffer | Uint8Array, filename = "audio.wav"): AnalysisResult {
   const decoded = decodeWav(bytes);
   const audio = resampleLinear(decoded, TARGET_SAMPLE_RATE);
+  return analyzeSamples(audio.samples, audio.sampleRate, filename);
+}
 
+export function analyzeSamples(samples: Float64Array, sampleRate: number, filename = "audio"): AnalysisResult {
+  const audio = resampleLinear(normalizeAudio({ sampleRate, samples }), TARGET_SAMPLE_RATE);
   if (audio.samples.length < audio.sampleRate / 2) {
     throw new Error("Audio must be at least 0.5 seconds long.");
   }

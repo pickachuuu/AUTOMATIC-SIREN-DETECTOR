@@ -13,6 +13,7 @@ declare global {
   }
 
   interface Window {
+    webkitAudioContext: typeof AudioContext;
     sirenDesktop?: {
       selectWavFile: () => Promise<DesktopFile | null>;
       listBundledSamples: () => Promise<BundledSample[]>;
