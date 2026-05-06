@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
 import { SIREN_BAND, type AnalysisResult } from "../detector/types";
 
+interface ChartProps {
+  result: AnalysisResult | null;
+  highlightIntervals?: Array<[number, number]>;
+}
+
 function setupCanvas(canvas: HTMLCanvasElement) {
   const rect = canvas.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
@@ -43,7 +48,33 @@ function strokeGlow(context: CanvasRenderingContext2D, color: string, blur: numb
   context.restore();
 }
 
-export function WaveformCanvas({ result }: { result: AnalysisResult | null }) {
+function drawHighlightIntervals(
+  context: CanvasRenderingContext2D,
+  intervals: Array<[number, number]>,
+  durationSeconds: number,
+  left: number,
+  top: number,
+  plotWidth: number,
+  plotHeight: number
+) {
+  if (!durationSeconds || intervals.length === 0) {
+    return;
+  }
+
+  context.save();
+  for (const [start, end] of intervals) {
+    const x = left + (Math.max(0, start) / durationSeconds) * plotWidth;
+    const width = Math.max(2, ((Math.min(durationSeconds, end) - Math.max(0, start)) / durationSeconds) * plotWidth);
+    context.fillStyle = "rgba(239, 68, 68, 0.22)";
+    context.fillRect(x, top, width, plotHeight);
+    context.strokeStyle = "rgba(250, 204, 21, 0.86)";
+    context.lineWidth = 1.5;
+    context.strokeRect(x, top, width, plotHeight);
+  }
+  context.restore();
+}
+
+export function WaveformCanvas({ result, highlightIntervals = [] }: ChartProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -66,6 +97,7 @@ export function WaveformCanvas({ result }: { result: AnalysisResult | null }) {
     context.fillStyle = gradient;
     context.fillRect(0, 0, width, height);
     drawAxes(context, width, height, "time domain: raw signal and band-pass response");
+    drawHighlightIntervals(context, highlightIntervals, result.durationSeconds, left, top, plotWidth, plotHeight);
     context.strokeStyle = "rgba(70, 242, 167, 0.9)";
     context.lineWidth = 1.4;
     strokeGlow(context, "rgba(70, 242, 167, 0.5)", 14, () => {
@@ -91,12 +123,12 @@ export function WaveformCanvas({ result }: { result: AnalysisResult | null }) {
       }
       context.stroke();
     });
-  }, [result]);
+  }, [result, highlightIntervals]);
 
   return <canvas ref={ref} className="chart-canvas" aria-label="Waveform chart" />;
 }
 
-export function SpectrogramCanvas({ result }: { result: AnalysisResult | null }) {
+export function SpectrogramCanvas({ result, highlightIntervals = [] }: ChartProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -146,6 +178,7 @@ export function SpectrogramCanvas({ result }: { result: AnalysisResult | null })
       }
     }
 
+    drawHighlightIntervals(context, highlightIntervals, result.durationSeconds, left, top, plotWidth, plotHeight);
     context.strokeStyle = "rgba(94, 231, 255, 0.86)";
     context.lineWidth = 1.5;
     context.shadowColor = "rgba(94, 231, 255, 0.72)";
@@ -159,12 +192,12 @@ export function SpectrogramCanvas({ result }: { result: AnalysisResult | null })
     }
     context.shadowBlur = 0;
     drawAxes(context, width, height, "STFT spectrogram, 0-3000 Hz");
-  }, [result]);
+  }, [result, highlightIntervals]);
 
   return <canvas ref={ref} className="chart-canvas" aria-label="STFT spectrogram" />;
 }
 
-export function FrequencyTrackCanvas({ result }: { result: AnalysisResult | null }) {
+export function FrequencyTrackCanvas({ result, highlightIntervals = [] }: ChartProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -187,6 +220,7 @@ export function FrequencyTrackCanvas({ result }: { result: AnalysisResult | null
     context.fillStyle = gradient;
     context.fillRect(0, 0, width, height);
     drawAxes(context, width, height, "dominant siren-band frequency track");
+    drawHighlightIntervals(context, highlightIntervals, result.durationSeconds, left, top, plotWidth, plotHeight);
     context.strokeStyle = "rgba(255, 209, 102, 0.96)";
     context.lineWidth = 2.4;
     strokeGlow(context, "rgba(255, 209, 102, 0.62)", 18, () => {
@@ -212,7 +246,7 @@ export function FrequencyTrackCanvas({ result }: { result: AnalysisResult | null
       context.fill();
     }
     context.shadowBlur = 0;
-  }, [result]);
+  }, [result, highlightIntervals]);
 
   return <canvas ref={ref} className="chart-canvas" aria-label="Frequency track chart" />;
 }

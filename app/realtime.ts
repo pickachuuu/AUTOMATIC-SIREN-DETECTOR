@@ -17,6 +17,15 @@ export interface RealtimeEvent {
   confidence: number;
   sweepScore: number;
   persistence: number;
+  analysis: AnalysisResult;
+  sweepEvidence: RealtimeSweepEvidence;
+}
+
+export interface RealtimeSweepEvidence {
+  passes: boolean;
+  freqSpan: number;
+  reversals: number;
+  jumpyRatio: number;
 }
 
 export function appendRollingBuffer(
@@ -113,11 +122,14 @@ export function createDetectionEvent(result: AnalysisResult, wasPreviouslyDetect
     return null;
   }
 
+  const sweepEvidence = realtimeSweepEvidence(result);
   return {
     id: `${now.getTime()}-${result.confidence}`,
     timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     confidence: result.confidence,
     sweepScore: result.sweepScore,
-    persistence: result.persistence
+    persistence: result.persistence,
+    analysis: result,
+    sweepEvidence
   };
 }

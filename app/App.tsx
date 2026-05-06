@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FrequencyTrackCanvas, SpectrogramCanvas, WaveformCanvas } from "./components/Charts";
 import { analyzeSamples, analyzeWavBytes, resultToJson } from "./detector/analyze";
 import type { AnalysisResult } from "./detector/types";
+import { explainRealtimeEvent, formatHighlightIntervals } from "./explanations";
 import {
   appendRollingBuffer,
   createDetectionEvent,
@@ -80,6 +81,7 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [realtimeEvents, setRealtimeEvents] = useState<RealtimeEvent[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [chartTab, setChartTab] = useState<ChartTab>("spectrogram");
 
   useEffect(() => {
@@ -102,10 +104,16 @@ export default function App() {
     [result]
   );
 
+  const selectedEvent = realtimeEvents.find((event) => event.id === selectedEventId) ?? null;
+  const displayedResult = selectedEvent?.analysis ?? result;
+  const highlightIntervals = displayedResult?.detected ? displayedResult.intervalsSeconds : [];
+  const selectedExplanation = selectedEvent ? explainRealtimeEvent(selectedEvent) : null;
+
   async function runAnalysis(name: string, buffer: ArrayBuffer, filePath?: string) {
     if (isRealtimeActive) {
       stopRealtime();
     }
+    setSelectedEventId(null);
     setIsAnalyzing(true);
     setError("");
     setSelectedName(name);
@@ -202,6 +210,7 @@ export default function App() {
 
     setRealtimeError("");
     setError("");
+    setSelectedEventId(null);
     setSelectedName("Live microphone");
     setSelectedPath("Rolling 4-second realtime monitor");
 
@@ -453,8 +462,8 @@ export default function App() {
               <div className="mb-3 grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="min-w-0 overflow-hidden border-2 border-zinc-700 bg-zinc-900 px-3 py-2">
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Detected intervals</p>
-                  <p className="max-w-full truncate font-mono text-sm font-black text-zinc-100" title={formatIntervals(result)}>
-                    {formatIntervals(result)}
+                  <p className="max-w-full truncate font-mono text-sm font-black text-zinc-100" title={formatHighlightIntervals(highlightIntervals)}>
+                    {formatHighlightIntervals(highlightIntervals)}
                   </p>
                 </div>
                 <div className="flex shrink-0 border-2 border-zinc-100 bg-zinc-100 p-1 text-zinc-950">
@@ -481,10 +490,10 @@ export default function App() {
                   {isRealtimeActive ? "Live " : ""}
                   {chartTab === "spectrogram" ? "Time-frequency scan" : chartTab === "waveform" ? "Waveform response" : "Sweep trajectory"}
                 </div>
-                {chartTab === "waveform" ? <WaveformCanvas result={result} /> : null}
-                {chartTab === "spectrogram" ? <SpectrogramCanvas result={result} /> : null}
-                {chartTab === "track" ? <FrequencyTrackCanvas result={result} /> : null}
-                {!result && !isAnalyzing ? (
+                {chartTab === "waveform" ? <WaveformCanvas result={displayedResult} highlightIntervals={highlightIntervals} /> : null}
+                {chartTab === "spectrogram" ? <SpectrogramCanvas result={displayedResult} highlightIntervals={highlightIntervals} /> : null}
+                {chartTab === "track" ? <FrequencyTrackCanvas result={displayedResult} highlightIntervals={highlightIntervals} /> : null}
+                {!displayedResult && !isAnalyzing ? (
                   <div className="absolute inset-0 grid place-items-center bg-[radial-gradient(circle_at_center,rgba(250,204,21,0.14),transparent_38%)] text-center">
                     <div className="border-2 border-zinc-100 bg-zinc-950 p-5 shadow-[8px_8px_0_#ef4444]">
                       <Waves className="mx-auto mb-3 h-10 w-10 text-yellow-300" aria-hidden="true" />
@@ -514,12 +523,53 @@ export default function App() {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              <div className="mb-3 border-2 border-zinc-100 bg-zinc-950 p-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-yellow-300">Selected evidence</p>
+                    <h3 className="text-sm font-black uppercase text-zinc-100">
+                      {selectedEvent ? selectedExplanation?.title : "No event selected"}
+                    </h3>
+                  </div>
+                  {selectedEvent ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEventId(null)}
+                      className="border-2 border-zinc-100 bg-zinc-100 px-2 py-1 text-[10px] font-black uppercase text-zinc-950 hover:bg-yellow-300"
+                    >
+                      Live
+                    </button>
+                  ) : null}
+                </div>
+                {selectedEvent && selectedExplanation ? (
+                  <div className="mt-2 text-xs leading-snug text-zinc-300">
+                    <p className="font-bold text-zinc-100">{selectedExplanation.summary}</p>
+                    <ul className="mt-2 grid gap-1">
+                      {selectedExplanation.bullets.map((bullet) => (
+                        <li key={bullet}>- {bullet}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 border-2 border-yellow-300 bg-yellow-300 p-2 font-black text-zinc-950">
+                      {selectedExplanation.fact}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs font-bold text-zinc-500">Select a live `YES` event to freeze its graphs and show the evidence.</p>
+                )}
+              </div>
               <div className="mb-3 border-2 border-zinc-100 bg-zinc-100 p-2 text-zinc-950">
                 <p className="text-[10px] font-black uppercase tracking-[0.18em]">Realtime events</p>
                 <div className="mt-2 grid gap-2">
                   {realtimeEvents.length === 0 ? <p className="text-xs font-bold">No live siren events yet.</p> : null}
                   {realtimeEvents.map((event) => (
-                    <div key={event.id} className="border-2 border-zinc-950 bg-red-500 p-2 text-zinc-950">
+                    <button
+                      key={event.id}
+                      type="button"
+                      onClick={() => setSelectedEventId(event.id)}
+                      className={`w-full border-2 border-zinc-950 p-2 text-left text-zinc-950 transition hover:-translate-y-0.5 ${
+                        selectedEventId === event.id ? "bg-yellow-300 shadow-[4px_4px_0_#18181b]" : "bg-red-500"
+                      }`}
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <strong className="text-xs font-black uppercase">Live alert</strong>
                         <time className="font-mono text-xs font-black">{event.timestamp}</time>
@@ -527,7 +577,7 @@ export default function App() {
                       <p className="mt-1 font-mono text-xs font-black">
                         conf {event.confidence.toFixed(3)} / sweep {event.sweepScore.toFixed(3)}
                       </p>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
