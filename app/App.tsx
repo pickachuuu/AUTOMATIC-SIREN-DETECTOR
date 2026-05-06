@@ -19,7 +19,11 @@ import type { AnalysisResult } from "./detector/types";
 import {
   appendRollingBuffer,
   createDetectionEvent,
+  isRealtimeCandidate,
+  REALTIME_REQUIRED_HITS,
   REALTIME_ANALYSIS_INTERVAL_MS,
+  REALTIME_WINDOW_SECONDS,
+  rmsLevel,
   type RealtimeEvent
 } from "./realtime";
 
@@ -46,7 +50,9 @@ function formatIntervals(result: AnalysisResult | null) {
   if (!result || result.intervalsSeconds.length === 0) {
     return "none";
   }
-  return result.intervalsSeconds.map(([start, end]) => `${start.toFixed(2)}s-${end.toFixed(2)}s`).join(", ");
+  const visible = result.intervalsSeconds.slice(0, 3).map(([start, end]) => `${start.toFixed(2)}s-${end.toFixed(2)}s`);
+  const hidden = result.intervalsSeconds.length - visible.length;
+  return hidden > 0 ? `${visible.join(", ")} +${hidden} more` : visible.join(", ");
 }
 
 function panelClass(extra = "") {
@@ -63,6 +69,7 @@ export default function App() {
   const liveSampleRateRef = useRef(0);
   const lastRealtimeAnalysisRef = useRef(0);
   const realtimeDetectedRef = useRef(false);
+  const realtimeHitCountRef = useRef(0);
   const [samples, setSamples] = useState<BundledSample[]>([]);
   const [selectedName, setSelectedName] = useState("No file selected");
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
@@ -180,6 +187,7 @@ export default function App() {
     liveSampleRateRef.current = 0;
     lastRealtimeAnalysisRef.current = 0;
     realtimeDetectedRef.current = false;
+    realtimeHitCountRef.current = 0;
     setIsRealtimeActive(false);
   }
 
@@ -214,6 +222,7 @@ export default function App() {
       liveBufferRef.current = new Float64Array();
       lastRealtimeAnalysisRef.current = 0;
       realtimeDetectedRef.current = false;
+      realtimeHitCountRef.current = 0;
 
       processor.onaudioprocess = (event) => {
         const input = event.inputBuffer.getChannelData(0);
@@ -223,7 +232,7 @@ export default function App() {
 
         const now = performance.now();
         if (
-          liveBufferRef.current.length < audioContext.sampleRate * 0.75 ||
+          liveBufferRef.current.length < audioContext.sampleRate * REALTIME_WINDOW_SECONDS ||
           now - lastRealtimeAnalysisRef.current < REALTIME_ANALYSIS_INTERVAL_MS
         ) {
           return;
@@ -232,9 +241,14 @@ export default function App() {
         lastRealtimeAnalysisRef.current = now;
         try {
           const liveResult = analyzeSamples(liveBufferRef.current, audioContext.sampleRate, "Live microphone");
-          const eventRecord = createDetectionEvent(liveResult, realtimeDetectedRef.current);
-          realtimeDetectedRef.current = liveResult.detected;
-          setResult(liveResult);
+          const rawRms = rmsLevel(liveBufferRef.current);
+          const candidate = isRealtimeCandidate(liveResult, rawRms);
+          realtimeHitCountRef.current = candidate ? realtimeHitCountRef.current + 1 : 0;
+          const confirmed = realtimeHitCountRef.current >= REALTIME_REQUIRED_HITS;
+          const displayedResult = { ...liveResult, detected: confirmed };
+          const eventRecord = createDetectionEvent(displayedResult, realtimeDetectedRef.current);
+          realtimeDetectedRef.current = confirmed;
+          setResult(displayedResult);
           if (eventRecord) {
             setRealtimeEvents((items) => [eventRecord, ...items].slice(0, 8));
             setHistory((items) =>
@@ -341,7 +355,9 @@ export default function App() {
                   </button>
                 </div>
                 <p className="mt-2 text-xs font-bold leading-tight">
-                  {isRealtimeActive ? "Listening with a rolling 4-second analysis window." : "Live microphone mode updates the console automatically."}
+                  {isRealtimeActive
+                    ? `Listening with a rolling ${REALTIME_WINDOW_SECONDS}-second analysis window.`
+                    : "Live microphone mode updates the console automatically."}
                 </p>
               </div>
 
@@ -434,12 +450,14 @@ export default function App() {
             ) : null}
 
             <div className="flex min-h-0 flex-1 flex-col p-3 pt-3">
-              <div className="mb-3 grid gap-3 md:grid-cols-[1fr_auto]">
-                <div className="border-2 border-zinc-700 bg-zinc-900 px-3 py-2">
+              <div className="mb-3 grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="min-w-0 overflow-hidden border-2 border-zinc-700 bg-zinc-900 px-3 py-2">
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Detected intervals</p>
-                  <p className="truncate font-mono text-sm font-black text-zinc-100">{formatIntervals(result)}</p>
+                  <p className="max-w-full truncate font-mono text-sm font-black text-zinc-100" title={formatIntervals(result)}>
+                    {formatIntervals(result)}
+                  </p>
                 </div>
-                <div className="flex border-2 border-zinc-100 bg-zinc-100 p-1 text-zinc-950">
+                <div className="flex shrink-0 border-2 border-zinc-100 bg-zinc-100 p-1 text-zinc-950">
                   {chartTabs.map((tab) => (
                     <button
                       key={tab.id}
